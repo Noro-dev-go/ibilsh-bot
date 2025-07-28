@@ -1,0 +1,191 @@
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from database.db import get_connection
+from database.clients import get_all_clients
+from database.scooters import get_scooters_by_client
+from database.payments import get_payments_by_scooter
+from database.postpone import get_active_postpones
+from utils.time_utils import get_today
+from services.yookassa_service import create_payment
+
+# Основная функция уведомления по текущей дате
+async def send_payment_notifications_with_button(bot: Bot, severity: str = "debug"):
+    today = get_today()
+    clients = get_all_clients()
+
+    for client in clients:
+        tg_id = client['telegram_id']
+        client_id = client['id']
+
+        scooters = get_scooters_by_client(client_id)
+        overdue = []
+        postponed = []
+        normal_payments = []
+
+        # === Собираем платежи по каждому скутеру ===
+        for scooter in scooters:
+            scooter_id = scooter['id']
+            payments = get_payments_by_scooter(scooter_id)
+            postpones = get_active_postpones(scooter_id)
+
+            skip_dates = {p[0] for p in postpones}        # original_date
+            notify_dates = {p[1] for p in postpones}      # scheduled_date
+
+            for p in payments:
+                pid, pay_date, amount, is_paid, _ = p
+                if is_paid:
+                    continue
+
+                # Просрочка
+                if pay_date < today:
+                    overdue.append((scooter, p))
+
+                # Сегодня (перенос или обычная оплата)
+                elif pay_date == today:
+                    postpone = next((post for post in postpones if post[1] == pay_date), None)
+                    if postpone:
+                        postponed.append((scooter, p, postpone))
+
+                # Обычная оплата (без переноса)
+                elif pay_date == today and pay_date not in skip_dates:
+                    normal_payments.append((scooter, p))
+
+        # === Фильтруем просрочки (исключаем те, по которым есть перенос) ===
+        filtered_overdue = []
+        active_postpones_cache = {}
+
+        for scooter, row in overdue:
+            scooter_id = scooter["id"]
+            if scooter_id not in active_postpones_cache:
+                active_postpones_cache[scooter_id] = get_active_postpones(scooter_id)
+
+            postpones = active_postpones_cache[scooter_id]
+            payment_date = row[1]
+
+            # Если по этой дате есть перенос — не считаем просрочкой
+            if any(p[0] == payment_date for p in postpones):
+                continue
+
+            filtered_overdue.append((scooter, row))
+
+        # === 1. Уведомления при ПРОСРОЧКЕ ===
+        if severity == "overdue":
+            if not filtered_overdue:
+                continue
+
+            total = len(filtered_overdue) * 1500 + sum(p[1][2] + p[1][3] for p in filtered_overdue)
+            text = "⚠️ <b>У вас есть просроченные платежи:</b>\n\n"
+            payment_ids = [p[0] for _, p in filtered_overdue]
+
+            for scooter, row in filtered_overdue:
+                text += (
+                    f"🛵 <b>{scooter['model']}</b>\n"
+                    f"📅 Неделя: {row[1].strftime('%d.%m.%Y')}\n"
+                    f"💰 Тариф: {row[2]}₽ + Штраф: 1500₽ = <b>{row[2] + 1500}₽</b>\n\n"
+                )
+
+            # Общий текст с инструкцией
+            text += format_payment_instruction_block(total)
+
+            # Создаём inline-кнопку
+            key = str(uuid.uuid4())[:8]
+            payment_confirm_registry[key] = payment_ids
+            cb_data = f"confirm_payment:{key}"
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Я оплатил", callback_data=cb_data)]
+            ])
+
+            # Отправляем уведомление
+            try:
+                await bot.send_message(chat_id=tg_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+            except Exception as e:
+                print(f"[❌ overdue] {tg_id} → {e}")
+
+            # ✅ Закрываем переносы по этим платежам (если были)
+            for scooter, row in filtered_overdue:
+                scooter_id = scooter["id"]
+                payment_date = row[1]
+                postpones = get_active_postpones(scooter_id)
+                for p in postpones:
+                    original_date, scheduled_date = p[0], p[1]
+                    if original_date == payment_date:
+                        close_postpone(scooter_id, payment_date)
+
+            continue  # Переходим к следующему клиенту
+
+        # === 2. Стандартные уведомления / переносы ===
+        if severity == "standard":
+            if overdue:
+                continue  # не отправляем обычное уведомление, если есть просрочка
+
+            # === Перенос — только по пятницам ===
+            if postponed and today.weekday() == 4:
+                total = 0
+                text = f"🔁 Обнаружены переносы по {len(postponed)} скутерам:\n\n"
+                payment_ids = []
+
+                for scooter, payment, postpone in postponed:
+                    orig = postpone[0].strftime('%d.%m')
+                    sched = postpone[1].strftime('%d.%m')
+                    fine = postpone[5]
+                    amount = scooter['weekly_price'] * 2 + fine
+                    total += amount
+
+                    payment_ids.append(payment[0])
+                    sched_pid = next(
+                        (p[0] for p in get_payments_by_scooter(scooter['id']) if p[1] == postpone[1]),
+                        None
+                    )
+                    if sched_pid:
+                        payment_ids.append(sched_pid)
+
+                    text += (
+                        f"🛵 <b>Модель: {scooter['model']}</b>\n"
+                        f"📅 Перенос: с <b>{orig}</b> на <b>{sched}</b>\n"
+                        f"💰 Сумма к оплате: <b>{amount}₽</b>\n"
+                        f"{'⚠️ Со штрафом +' + str(fine) + '₽' if fine else '✅ Без штрафа'}\n\n"
+                    )
+
+                text += format_payment_instruction_block(total)
+
+                key = str(uuid.uuid4())[:8]
+                payment_confirm_registry[key] = payment_ids
+                cb_data = f"confirm_payment:{key}"
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Я оплатил", callback_data=cb_data)]
+                ])
+
+                try:
+                    await bot.send_message(chat_id=tg_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+                except Exception as e:
+                    print(f"[❌ postpone] {tg_id} → {e}")
+
+                # ✅ Закрываем все переносы, по которым отправили уведомление
+                for scooter, payment, postpone in postponed:
+                    scooter_id = scooter["id"]
+                    scheduled_date = postpone[1]
+                    close_postpone(scooter_id, scheduled_date)
+
+                continue
+
+            # === 3. Обычные платежи (если нет просрочек и переносов) ===
+            if normal_payments:
+                total = sum(p[2] + p[3] for _, p in normal_payments)
+                payment_ids = [p[0] for _, p in normal_payments]
+
+                text = (
+                    f"📅 Сегодня день оплаты аренды.\n"
+                    f"💰 Сумма к оплате: <b>{total}₽</b>\n\n"
+                    + format_payment_instruction_block(total)
+                )
+
+                key = str(uuid.uuid4())[:8]
+                payment_confirm_registry[key] = payment_ids
+                cb_data = f"confirm_payment:{key}"
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Я оплатил", callback_data=cb_data)]
+                ])
+
+                try:
+                    await bot.send_message(chat_id=tg_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+                except Exception as e:
+                    print(f"[❌ normal] {tg_id} → {e}")
