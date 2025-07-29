@@ -51,9 +51,6 @@ NOTES_STATE = 2001
 PHOTO_COUNT, PHOTO_COLLECT = range(3101, 3103)
 
 
-#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
-#add_admin(tg_id=856550800, username="@xxxxxxxxxnxxxw", full_name="Толстов Андрей Русланович")
-
 
 cancel_fallback = MessageHandler(
     filters.Regex("^(⬅️ Назад|назад|отмена|/cancel|/start|/menu|/admin)$"),
@@ -652,12 +649,12 @@ async def refresh_scooter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     paid_payments = [p for p in payments if p[2] is True]
 
     if paid_payments:
-        # ✅ если есть оплаченные платежи — график продолжаем от последней оплаты
+       
         last_paid_date = max(p[0] for p in paid_payments)
         start_date = last_paid_date + timedelta(days=7)
 
     else:
-        # ✅ если оплат ещё не было — строим график от ДАТЫ ВЫДАЧИ
+        
         issue_date = scooter.get("issue_date")
         if not issue_date:
             await query.message.reply_text("❗ У скутера не указана дата выдачи.")
@@ -665,24 +662,24 @@ async def refresh_scooter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         weekday_issue = issue_date.weekday()  # 0-пн ... 6-вс
 
-        # 1️⃣ ближайшая пятница после даты выдачи
+       
         days_to_friday = (4 - weekday_issue) % 7
         first_friday = issue_date + timedelta(days=days_to_friday)
 
-        # 2️⃣ если выдача была ПН–ПТ → первая оплата только на следующей неделе
+        
         if weekday_issue <= 4:
             first_friday += timedelta(weeks=1)
 
         start_date = first_friday
 
-    # ✅ Вычисляем сколько недель надо вставить
+   
     if scooter['tariff_type'] == "Выкуп":
         paid_weeks = len(paid_payments)
         remaining_weeks = full_weeks_count - paid_weeks
     else:
         remaining_weeks = full_weeks_count
 
-    # 🔥 Теперь перед обновлением удаляем только неоплаченные платежи, но не «сдвигаем» первую пятницу дальше!
+    
     refresh_payment_schedule_by_scooter(scooter_id, start_date, remaining_weeks, weekly_price)
 
     await cleanup_admin_messages(update, context)
