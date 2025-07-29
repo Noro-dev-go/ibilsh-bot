@@ -90,6 +90,8 @@ async def start_edit_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === Работа с CLIENT ===
 
 async def back_to_client_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cleanup_edit_messages(update, context)  
+
     query = update.callback_query
     await query.answer()
 
@@ -121,7 +123,7 @@ async def choose_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📍 Город", callback_data="edit_city")],
             [InlineKeyboardButton("📞 Телефон", callback_data="edit_phone")],
             [InlineKeyboardButton("🏢 Работа", callback_data="edit_workplace")],
-            [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_client_menu")]
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_back_client")]
         ])
         msg = await update.effective_chat.send_message("Выберите что редактировать:", reply_markup=keyboard)
 
