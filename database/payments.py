@@ -1,6 +1,7 @@
 from database.db import get_connection
 from psycopg2.extras import execute_values
 from utils.schedule_utils import get_next_fridays
+from utils.time_utils import get_today
 from datetime import date, timedelta
 
 # Создать график платежей по скутеру (массовая вставка новых платежей)
@@ -91,14 +92,20 @@ def save_payment_schedule_by_scooter(scooter_id: int, dates: list, weekly_price:
 def refresh_payment_schedule_by_scooter(scooter_id: int, start_date, weeks: int, weekly_price: int):
     with get_connection() as conn:
         with conn.cursor() as cur:
+            # ❗ Удаляем только неоплаченные платежи
             cur.execute("""
                 DELETE FROM payments
                 WHERE scooter_id = %s AND is_paid = FALSE
             """, (scooter_id,))
 
-            new_dates = get_next_fridays(start_date, weeks)
-            values = [(scooter_id, d, weekly_price, False, None, None) for d in new_dates]
-            
+            # ✅ Генерируем даты без повторного сдвига
+            new_dates = [start_date + timedelta(weeks=i) for i in range(weeks)]
+
+            values = [
+                (scooter_id, d, weekly_price, False, None, None)
+                for d in new_dates
+            ]
+
             execute_values(
                 cur,
                 """
