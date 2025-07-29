@@ -53,7 +53,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+async def contact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Владелец - @ibilsh\n" \
+        "Разработчик бота - @tolstovdev\n\n" \
+        "Если у Вас возник вопрос по поводу работы бота Ibilsh или какая-либо идея по улучшению функционала, то смело пишите разработчику\n" \
+        "Если же у Вас вопрос, касающийся непосредственно аренды\выкупа электровелосипеда, то пишите владельцу.",
+        parse_mode="HTML"
+    )
+    return ConversationHandler.END
+
+
 
 start_handler = CommandHandler("start", start)
 menu_handler = CommandHandler("menu", menu_command)
 help_handler = CommandHandler("help", help_command)
+contact_handler = CommandHandler("contacts", contact_command)
