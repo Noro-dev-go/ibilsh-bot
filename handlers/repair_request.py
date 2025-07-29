@@ -170,7 +170,7 @@ async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    context.user_data["username"] = f"{user.username}" if user.username else "не указан"
+    context.user_data["username"] = f"@{user.username}" if user.username else "не указан"
     context.user_data["tg_id"] = user.id
 
     save_pending_repair(context.user_data)
