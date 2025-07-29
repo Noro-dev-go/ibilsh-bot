@@ -4,9 +4,7 @@ import nest_asyncio
 from dotenv import load_dotenv
 
 
-from handlers.start import start_handler
-from handlers.start import menu_handler
-from handlers.start import help_handler
+from handlers.start import start_handler, menu_handler, help_handler, contact_handler
 
 from telegram.ext import (
     Application,
@@ -86,6 +84,7 @@ async def main():
     app.add_handler(start_handler)
     app.add_handler(menu_handler)
     app.add_handler(help_handler)
+    app.add_handler(contact_handler)
 
     # --- Команды Telegram /start, /help и т.д. ---
     await setup_bot_commands(app.bot)
