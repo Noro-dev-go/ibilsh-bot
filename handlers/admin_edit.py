@@ -417,7 +417,7 @@ async def process_issue_date(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return EDIT_DATE
     update_scooter_field(scooter_id, "issue_date", date_obj)
     msg = await update.message.reply_text("✅ Дата обновлена.")
-    context.user_data["edit_messages_ids"].append(msg.message_id)
+    context.user_data["edit_message_ids"].append(msg.message_id)
     return await back_to_scooter_field_menu(update, context)
 
 
