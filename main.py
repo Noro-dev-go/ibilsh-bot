@@ -92,6 +92,8 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^/exit$"), exit_to_personal_menu))
 
     print("Бот запущен...")
+    
+
 
     # --- Планировщик уведомлений ---
     scheduler = AsyncIOScheduler()
@@ -119,7 +121,7 @@ async def main():
 # Запуск планировщика
     scheduler.start()
     await app.run_polling()
-
+    
 
 if __name__ == "__main__":
     nest_asyncio.apply()
