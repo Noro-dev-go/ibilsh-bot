@@ -26,6 +26,7 @@ from utils.payments_utils import format_payment_schedule
 from utils.schedule_utils import get_next_fridays
 from utils.cleanup import cleanup_admin_messages
 from utils.time_utils import get_today
+from utils.encryption import encrypt_file_id, decrypt_file_id
 
 from handlers.cancel_handler import universal_cancel_handler, admin_back_handler
 from handlers.admin_register import fill_callback
@@ -161,16 +162,28 @@ async def show_clients_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         custom_photos = get_custom_photos_by_client(client_id)
 
         if client.get("client_photo_id"):
-            photos.append(InputMediaPhoto(client["client_photo_id"], caption="👤 Клиент"))
+            photos.append(InputMediaPhoto(
+                decrypt_file_id(client["client_photo_id"]), 
+                caption="👤 Клиент"
+        ))
 
         if client.get("passport_main_id"):
-            photos.append(InputMediaPhoto(client["passport_main_id"], caption="📄 Паспорт: главная"))
+            photos.append(InputMediaPhoto(
+                decrypt_file_id(client["passport_main_id"]), 
+                caption="📄 Паспорт: главная"
+        ))
 
         if client.get("passport_address_id"):
-            photos.append(InputMediaPhoto(client["passport_address_id"], caption="🏠 Паспорт: прописка"))
+            photos.append(InputMediaPhoto(
+                decrypt_file_id(client["passport_address_id"]), 
+                caption="🏠 Паспорт: прописка"
+        ))
 
         for i, file_id in enumerate(custom_photos, start=1):
-            photos.append(InputMediaPhoto(file_id, caption=f"📷 Доп. фото {i}"))
+            photos.append(InputMediaPhoto(
+                decrypt_file_id(file_id), 
+                caption=f"📷 Доп. фото {i}"
+        ))
 
         if photos:
             if len(photos) == 1:
@@ -391,8 +404,9 @@ async def handle_flexible_photo(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("⚠️ Пожалуйста, отправьте именно фото.")
         return PHOTO_COLLECT
 
-    file_id = update.message.photo[-1].file_id
-    context.user_data["photo_ids"].append(file_id)
+    # Шифруем file_id перед сохранением
+    encrypted_file_id = encrypt_file_id(update.message.photo[-1].file_id)
+    context.user_data["photo_ids"].append(encrypted_file_id)
     context.user_data["photo_step"] += 1
 
     current = context.user_data["photo_step"]
@@ -404,7 +418,6 @@ async def handle_flexible_photo(update: Update, context: ContextTypes.DEFAULT_TY
         return PHOTO_COLLECT
 
     # Сохраняем в отдельную таблицу
-
     client_id = context.user_data["upload_photo_client_id"]
     photos = context.user_data["photo_ids"]
 
@@ -421,7 +434,6 @@ async def handle_flexible_photo(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("✅ Фото успешно добавлены!")
 
     return await back_to_selected_client(update, context)
-
 
 async def show_done_repairs_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     repairs = get_all_done_repairs_admin()
@@ -877,19 +889,18 @@ async def show_single_client(update: Update, context: ContextTypes.DEFAULT_TYPE,
         await update.effective_chat.send_message("❌ Клиент не найден.")
         return
 
-    
     text = (
         f"👤 <b>{client['full_name']}</b>, {client['age']} лет\n"
         f"📍 Город: {client['city']}\n"
         f"📞 Телефон: {client['phone']}\n"
         f"🏢 Работа: {client['workplace'] or '—'}\n"
         f"🆔 Telegram ID: <code>{client['telegram_id']}</code>\n"
-        f"🧑‍💻 Username: {client['username'] if client['username'].startswith('@') else '@' + client['username'] if client['username'] else '—'}\n"
+        f"🧑‍💻 Username: "
+        f"{client['username'] if client['username'] and client['username'].startswith('@') else '@' + client['username'] if client['username'] else '—'}\n"
         f"\n<b>🛵 Скутеры клиента:</b>\n\n"
     )
 
     scooters = get_scooters_by_client(client_id)
-
     for idx, scooter in enumerate(scooters, start=1):
         if len(scooters) > 1 and idx > 1:
             text += "\n🔻🔻🔻🔻🔻🔻🔻🔻🔻\n\n"
@@ -920,21 +931,19 @@ async def show_single_client(update: Update, context: ContextTypes.DEFAULT_TYPE,
         payments = get_payments_by_scooter(scooter['id'])
         postpones = get_active_postpones(scooter['id'])
 
-
         postpones_dicts = [
-        {   
-        "original_date": row[0],
-        "scheduled_date": row[1],
-        "with_fine": row[2],
-        "fine_amount": row[3],
-        "requested_at": row[4]
-        }
-        for row in postpones
+            {
+                "original_date": row[0],
+                "scheduled_date": row[1],
+                "with_fine": row[2],
+                "fine_amount": row[3],
+                "requested_at": row[4]
+            }
+            for row in postpones
         ]
-
         text += format_payment_schedule(client['telegram_id'], payments, postpones_dicts)
-    notes = get_notes(client_id)
 
+    notes = get_notes(client_id)
     if notes:
         text += "\n\n📝 <b>Последние заметки:</b>\n\n"
         for note, created_at in notes:
@@ -943,58 +952,60 @@ async def show_single_client(update: Update, context: ContextTypes.DEFAULT_TYPE,
         text += "\n\n📝 Заметок пока нет.\n\n"
 
     keyboard = InlineKeyboardMarkup([
-            [
+        [
             InlineKeyboardButton("⚙️ Редактировать", callback_data=f"edit_client:{client_id}"),
             InlineKeyboardButton("🔄 Продлить аренду", callback_data=f"extend_start:{client_id}")
-            ],
-            [InlineKeyboardButton("📷 Загрузить фото", callback_data=f"add_photos:{client_id}")
-            ],
-            [
-            InlineKeyboardButton("🔧 Обновить график", callback_data=f"refresh_menu:{client_id}")
-            ],
-            [
+        ],
+        [InlineKeyboardButton("📷 Загрузить фото", callback_data=f"add_photos:{client_id}")],
+        [InlineKeyboardButton("🔧 Обновить график", callback_data=f"refresh_menu:{client_id}")],
+        [
             InlineKeyboardButton("📝 Добавить заметку", callback_data=f"notes:{client_id}"),
             InlineKeyboardButton("📄 Все заметки", callback_data=f"all_notes:{client_id}")
-            ],
-            [InlineKeyboardButton("❌ Удалить клиента", callback_data=f"delete_client:{client_id}")],
-            [   
-            InlineKeyboardButton("🔙 Назад", callback_data="admin_back")
-            ]  
-        ])
-        
-    
+        ],
+        [InlineKeyboardButton("❌ Удалить клиента", callback_data=f"delete_client:{client_id}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]
+    ])
+
+    # Фото
     custom_photos = get_custom_photos_by_client(client_id)
     standard_photos = []
 
     if client.get("client_photo_id"):
-            standard_photos.append(InputMediaPhoto(client["client_photo_id"], caption="👤 Клиент"))
+        standard_photos.append(InputMediaPhoto(
+            decrypt_file_id(client["client_photo_id"]),
+            caption="👤 Клиент"
+        ))
     if client.get("passport_main_id"):
-            standard_photos.append(InputMediaPhoto(client["passport_main_id"], caption="📄 Паспорт: главная"))
+        standard_photos.append(InputMediaPhoto(
+            decrypt_file_id(client["passport_main_id"]),
+            caption="📄 Паспорт: главная"
+        ))
     if client.get("passport_address_id"):
-            standard_photos.append(InputMediaPhoto(client["passport_address_id"], caption="🏠 Паспорт: прописка"))
-
+        standard_photos.append(InputMediaPhoto(
+            decrypt_file_id(client["passport_address_id"]),
+            caption="🏠 Паспорт: прописка"
+        ))
 
     for i, file_id in enumerate(custom_photos, start=1):
-            standard_photos.append(InputMediaPhoto(file_id, caption=f"📷 Доп. фото {i}"))
+        standard_photos.append(InputMediaPhoto(
+            decrypt_file_id(file_id),
+            caption=f"📷 Доп. фото {i}"
+        ))
 
-            if standard_photos:
-                if len(standard_photos) == 1:
-                    msg = await update.effective_chat.send_photo(
-                    photo=standard_photos[0].media, caption=standard_photos[0].caption
-        )
-                    context.user_data.setdefault("client_message_ids", []).append(msg.message_id)
-    else:
-                    msgs = await update.effective_chat.send_media_group(media=standard_photos)
-                    for msg in msgs:
-                        context.user_data.setdefault("client_message_ids", []).append(msg.message_id)  
-
+    if standard_photos:
+        if len(standard_photos) == 1:
+            msg_photo = await update.effective_chat.send_photo(
+                photo=standard_photos[0].media, caption=standard_photos[0].caption
+            )
+            context.user_data.setdefault("client_message_ids", []).append(msg_photo.message_id)
+        else:
+            msgs = await update.effective_chat.send_media_group(media=standard_photos)
+            for msg in msgs:
+                context.user_data.setdefault("client_message_ids", []).append(msg.message_id)
 
     msg = await update.effective_chat.send_message(text, parse_mode="HTML", reply_markup=keyboard)
-    #context.user_data.setdefault("client_message_ids", []).append(msg.message_id)
     context.user_data["came_from_search"] = True
-    context.user_data["client_id"] = client_id  
-
-
+    context.user_data["client_id"] = client_id
 
 async def process_search_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("FSM (DEBUG): вошли в process_search_selection")
