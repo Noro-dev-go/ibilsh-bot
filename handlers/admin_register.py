@@ -16,6 +16,8 @@ from database.users import add_user, set_user_has_scooter
 from database.pending import delete_pending_user, get_all_pending_users
 
 from utils.schedule_utils import get_next_fridays
+from utils.encryption import encrypt_file_id
+
 
 from handlers.cancel_handler import universal_cancel_handler
 from handlers.admin_auth import admin_entry
@@ -157,21 +159,33 @@ async def ask_client_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def receive_client_photo(update, context):
     await cleanup_register_messages(update, context)
-    context.user_data["client_photo_id"] = update.message.photo[-1].file_id
+    
+    encrypted_client_photo_id = encrypt_file_id(update.message.photo[-1].file_id)
+    context.user_data["client_photo_id"] = encrypted_client_photo_id
+    
     msg = await update.message.reply_text("📄 Пришлите фото паспорта — главная страница:")
     context.user_data.setdefault("reg_message_ids", []).append(msg.message_id)
     return ASK_PASSPORT_MAIN
 
+
 async def receive_passport_main(update, context):
     await cleanup_register_messages(update, context)
-    context.user_data["passport_main_id"] = update.message.photo[-1].file_id
-    msg = await update.message.reply_text("🏠 Пришлите фото паспорта — страница с адресом регистрации:")
+
+    # Шифруем file_id перед сохранением
+    encrypted_main_id = encrypt_file_id(update.message.photo[-1].file_id)
+    context.user_data["passport_main_id"] = encrypted_main_id
+    msg = await update.message.reply_text(
+        "🏠 Пришлите фото паспорта — страница с адресом регистрации:"
+    )
     context.user_data.setdefault("reg_message_ids", []).append(msg.message_id)
     return ASK_PASSPORT_ADDRESS
 
 async def receive_passport_address(update, context):
     await cleanup_register_messages(update, context)
-    context.user_data["passport_address_id"] = update.message.photo[-1].file_id
+
+    # Шифруем file_id и сохраняем в user_data
+    encrypted_address_id = encrypt_file_id(update.message.photo[-1].file_id)
+    context.user_data["passport_address_id"] = encrypted_address_id
     return await ask_scooter_count(update, context)
 
 async def ask_scooter_count(update: Update, context: ContextTypes.DEFAULT_TYPE):

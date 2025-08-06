@@ -1,7 +1,7 @@
 from datetime import date
 
 
-TEST_DATE = None #date(2026, 8, 7)
+TEST_DATE = None #date(2025, 7, 19)
 
 
 def get_today() -> date:
