@@ -81,3 +81,4 @@ def get_last_attempt_at(tg_id: int) -> Optional[datetime]:
         cur.execute("SELECT last_attempt_at FROM admin_locks WHERE tg_id = %s", (tg_id,))
         row = cur.fetchone()
         return row[0] if row else None
+
