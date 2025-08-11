@@ -26,7 +26,7 @@ from handlers.register_client import cleanup_previous_messages
 from handlers.keyboard_utils import get_keyboard
 from handlers.admin_edit import cleanup_client_messages
 
-from services.yookassa_service import create_payment
+
 
 from utils.payments_utils import format_payment_schedule, get_payment_id_by_date
 from utils.time_utils import get_today
