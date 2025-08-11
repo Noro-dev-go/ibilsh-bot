@@ -2,6 +2,12 @@ from database.db import get_connection
 
 from psycopg2.extras import DictCursor
 
+
+ALLOWED_CLIENT_FIELDS = {
+    "username", "full_name", "age", "city", "phone",
+    "workplace", "client_photo_id", "passport_main_id", "passport_address_id"
+}
+
 # Добавление нового клиента
 def add_client(telegram_id: int, username: str, full_name: str, age: int, city: str, phone: str, workplace: str, client_photo_id: str, passport_main_id: str, passport_address_id: str):
     with get_connection() as conn:
@@ -114,6 +120,9 @@ def get_client_by_id(client_id: int):
             }
        
 def update_client_field(client_id, field, value):
+    if field not in ALLOWED_CLIENT_FIELDS:
+        raise ValueError(f"Field '{field}' is not allowed to update.")
+    
     with get_connection() as conn:
         with conn.cursor() as cur:
             sql = f"UPDATE clients SET {field} = %s WHERE id = %s"

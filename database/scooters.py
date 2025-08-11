@@ -1,5 +1,11 @@
 from database.db import get_connection
 
+ALLOWED_FIELDS = {
+    "model", "vin", "motor_vin", "issue_date",
+    "tariff_type", "weekly_price", "buyout_weeks",
+    "has_contract", "has_second_keys", "has_tracker",
+    "has_limiter", "has_pedals", "has_sim"
+}
 
 def add_scooter(client_id: int, data: dict):
     with get_connection() as conn:
@@ -101,6 +107,8 @@ def get_scooter_by_id(scooter_id: int):
 
 
 def update_scooter_field(scooter_id, field, value):
+    if field not in ALLOWED_FIELDS:
+        raise ValueError(f"Field '{field}' is not allowed to update.")
     with get_connection() as conn:
         with conn.cursor() as cur:
             sql = f"UPDATE scooters SET {field} = %s WHERE id = %s"
