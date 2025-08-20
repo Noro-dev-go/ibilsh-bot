@@ -8,7 +8,7 @@ from database.pending import save_pending_user
 from utils.validators import is_valid_name
 from handlers.keyboard_utils import get_keyboard
 
-ASK_NAME, ASK_AGE, ASK_CITY, ASK_PHONE, ASK_TARIFF, ASK_SCOOTER_COUNT, SHOW_INFO, CONFIRM_ORDER, ASK_SHOW_PRODUCTS = range(9)
+ASK_NAME, ASK_AGE, ASK_CITY, ASK_PHONE, ASK_TARIFF, CONFIRM_ORDER, ASK_SHOW_PRODUCTS = range(7)
 
 cancel_fallback = MessageHandler(
     filters.Regex("^(⬅️ Назад|назад|отмена|/cancel|/start|/menu)$"),
@@ -198,25 +198,14 @@ async def ask_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store_message_id(context, msg)
     return ASK_TARIFF
 
-async def ask_scooter_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await cleanup_previous_messages(update, context)
-    context.user_data["preferred_tariff"] = update.message.text.strip()
-
-    msg = await update.message.reply_text("📊 Сколько скутеров вас интересует?\n\n" \
-    "Пожалуйста, укажите цифру/число (например 1, если вас интересует только один электровелосипед)")
-    store_message_id(context, msg)
-    return ASK_SCOOTER_COUNT
 
 async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cleanup_previous_messages(update, context)
 
-    count = update.message.text.strip()
-    if not count.isdigit() or int(count) < 1 or int(count) > 10:
-        msg = await update.message.reply_text("❗ Введите корректное количество (от 1 до 10):")
-        store_message_id(context, msg)
-        return ASK_SCOOTER_COUNT
+    context.user_data["preferred_tariff"] = update.message.text.strip()
 
-    context.user_data["scooter_count"] = int(count)
+    # ✅ Убираем клавиатуру сразу, не дожидаясь конца FSM
+    await update.message.reply_text("Все необходимые данные получены, спасибо! Ожидайте, мы скоро с вами свяжемся.", reply_markup=ReplyKeyboardRemove())
 
     tg_user = update.effective_user
     context.user_data["username"] = f"@{tg_user.username}" if tg_user.username else "не указан"
@@ -224,12 +213,12 @@ async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = context.user_data
     save_pending_user(data)
-    await notify_admin_about_new_client(data)
 
-    await update.message.reply_text(
-        "🚀 Спасибо! Ваша анкета отправлена администратору. Вам напишут в телеграмм либо перезвонят, пожалуйста ожидайте.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    try:
+        await notify_admin_about_new_client(data)
+    except Exception as e:
+        print(f"[ERROR] Уведомление админу не отправлено: {e}")
+
     await update.message.reply_text("🔙 Вы вернулись в главное меню.", reply_markup=get_keyboard())
     return ConversationHandler.END
 
@@ -243,8 +232,8 @@ register_conv_handler = ConversationHandler(
         ASK_AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_city)],
         ASK_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
         ASK_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_tariff)],
-        ASK_TARIFF: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_scooter_count)],
-        ASK_SCOOTER_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, finish)],
+        ASK_TARIFF: [MessageHandler(filters.TEXT & ~filters.COMMAND, finish)],
+       
     },
     fallbacks=[cancel_fallback]
 )
