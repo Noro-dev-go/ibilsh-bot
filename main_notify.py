@@ -1,9 +1,10 @@
 import os
+
 from dotenv import load_dotenv
+load_dotenv()
+
 from telegram.ext import Application, CallbackQueryHandler
 from handlers.repair_done import confirm_repair_completion, finish_repair_and_notify_admin
-
-load_dotenv()
 
 # Создаём Application для второго бота
 app = Application.builder().token(os.getenv("NOTIFIER_TOKEN")).build()
