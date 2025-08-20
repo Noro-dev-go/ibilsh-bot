@@ -88,7 +88,6 @@ async def notify_admin_about_new_client(data: dict):
         f"🏙️ Город: {data['city']}\n"
         f"📞 Телефон: {data['phone']}\n"
         f"📦 Тариф: {data.get('preferred_tariff', 'не указан')}\n"
-        f"🔢 Кол-во скутеров: {data.get('scooter_count', 'не указано')}\n"
         f"🔗 Username: {data['username']}\n"
         f"🆔 <code>{data['tg_id']}</code>\n\n"
         f"❗ После выдачи скутера не забудьте оформить данные нового пользователя в главном боте Ibilsh."
@@ -99,7 +98,6 @@ async def notify_admin_about_new_client(data: dict):
             text=text,
             parse_mode="HTML"
         )
-
 
 
 # Отправка заявки на ремонт мастеру
