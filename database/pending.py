@@ -16,8 +16,8 @@ def save_pending_user(data: dict):
     cur = conn.cursor()
 
     cur.execute("""
-    INSERT INTO pending_users (tg_id, username, name, age, city, phone, preferred_tariff, scooter_count)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    INSERT INTO pending_users (tg_id, username, name, age, city, phone, preferred_tariff)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (tg_id) DO NOTHING
 """, (
     data["tg_id"],
@@ -27,7 +27,7 @@ def save_pending_user(data: dict):
     data["city"],
     data["phone"],
     data.get("preferred_tariff"),
-    data.get("scooter_count", 1)
+    
 ))
 
     conn.commit()
