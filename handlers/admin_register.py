@@ -9,6 +9,7 @@ from datetime import datetime
 
 
 
+
 from database.clients import add_client
 from database.scooters import add_scooter
 from database.payments import create_payment_schedule
@@ -21,6 +22,7 @@ from utils.encryption import encrypt_file_id
 
 from handlers.cancel_handler import universal_cancel_handler
 from handlers.admin_auth import admin_entry
+from handlers.gs_sync import gs_choice_cb, gs_enter_col, GS_WAIT_COL
 
 
 
@@ -430,23 +432,79 @@ async def save_all_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_user_has_scooter(tg_id)
     delete_pending_user(tg_id)
 
+    client_full_name = context.user_data.get("full_name", "").strip()
+    phone = context.user_data.get("phone", "").strip()
+    workplace = context.user_data.get("workplace", "").strip()
+
+    username = context.user_data.get("username")
+    if not username:
+        u = update.effective_user
+        if u and u.username:
+            username = f"@{u.username}"
+    # добавим @, если его нет
+    if username and not username.startswith("@"):
+        username = f"@{username}"
+
+    # 2) берём «основной» скутер для записи в колонку
+    #    (на тесте у тебя один скутер; при множестве — позже сделаем выбор по кнопкам)
+    scooter_for_sheet = (context.user_data.get("scooters") or [])[0]
+
+    # 3) формируем payload ровно под твои строки в таблице
+    context.user_data[f"gs_synced_{client_id}"] = False
+    context.user_data[f"gs_payload_{client_id}"] = {
+        "Стоимость аренды в н-ю.": scooter_for_sheet["weekly_price"],
+        "Дата введения в эксплуатацию": scooter_for_sheet.get("commission_date") or scooter_for_sheet["issue_date"],
+        "Начальная стоимость": scooter_for_sheet.get("initial_cost"),
+        "Зашло": scooter_for_sheet.get("deposit") or 0,
+        "Модель транспорта 1/2 АКБ": scooter_for_sheet["model"],
+        "Вин номер рамы": scooter_for_sheet["vin"],
+        "Вин номер мотора": scooter_for_sheet["motor_vin"],
+        "Вин номер АКБ#1": scooter_for_sheet.get("battery1_vin") or "нет",
+        "Вин номер АКБ#2": scooter_for_sheet.get("battery2_vin") or "нет",
+        "Наличие GPS": scooter_for_sheet.get("has_tracker", False),
+        "Дата выдачи": scooter_for_sheet["issue_date"],
+        "ФИО арендатора": client_full_name,
+        "Тег арендатора": username or "",
+        "Номер арендатора": phone,
+        "Место работы": workplace,
+        "Основной склад": scooter_for_sheet.get("warehouse") or "",
+        "Наличие договора": scooter_for_sheet.get("has_contract", False),
+        "Заметки": scooter_for_sheet.get("notes") or "",
+}
+
+    kb = InlineKeyboardMarkup([
+    [InlineKeyboardButton("➕ Добавить в Google Sheets", callback_data=f"gs_add:{client_id}")],
+    [InlineKeyboardButton("⏭️ Пропустить", callback_data=f"gs_skip:{client_id}")],
+])
+    await update.effective_chat.send_message("Оформление завершено. Добавить клиента в Google Sheets?", reply_markup=kb)
+    
    
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Назад в главное меню админа", callback_data="reg_back"),
-        ]
-    ])
-    msg = await update.callback_query.message.reply_text("✅ Клиент успешно оформлен. График платежей создан.", reply_markup=keyboard)
+#    keyboard = InlineKeyboardMarkup([
+  #      [
+  #          InlineKeyboardButton("Назад в главное меню админа", callback_data="reg_back"),
+  #      ]
+   # ])
+ #   msg = await update.callback_query.message.reply_text("✅ Клиент успешно оформлен. График платежей создан.", reply_markup=keyboard)
 
-    context.user_data.setdefault("reg_message_ids", []).append(msg.message_id)  
+  #  context.user_data.setdefault("reg_message_ids", []).append(msg.message_id)  
 
-    return ConversationHandler.END
+ #   return ConversationHandler.END
 
 
 
 
 def register_admin_reg_handlers(app):
     app.add_handler(CallbackQueryHandler(handle_reg_back, pattern="^reg_back$"))
+
+    app.add_handler(ConversationHandler(
+        entry_points=[CallbackQueryHandler(gs_choice_cb, pattern=r"^gs_(add|skip):\d+$")],
+        states={
+            GS_WAIT_COL: [MessageHandler(filters.TEXT & ~filters.COMMAND, gs_enter_col)],
+        },
+        fallbacks=[],
+        name="gsheets_add",
+        persistent=False,
+    ))
 
 admin_register_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(fill_callback, pattern=r"^fill:\d+$")],
