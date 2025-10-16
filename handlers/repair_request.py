@@ -86,8 +86,6 @@ async def repair_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["repair_message_ids"] = [msg.message_id]
   
 
-
-
 async def start_full_repair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cleanup_repair_messages(update, context)  # 🧼 очистка перед началом
     await update.callback_query.answer()
