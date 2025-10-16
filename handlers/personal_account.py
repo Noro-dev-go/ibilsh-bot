@@ -7,7 +7,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from services.notifier import notify_admin_about_postpone
-from services.google_sheets import log_payment_postpone
+#from services.google_sheets import log_payment_postpone
 
 import uuid
 
@@ -18,7 +18,7 @@ from database.users import check_user, get_user_info
 from database.clients import get_client_by_tg_id
 from database.repairs import  get_all_done_repairs
 from database.postpone import save_postpone_request, get_postpone_for_date, get_active_postpones, has_active_postpone, get_postpone_dates_by_tg_id, close_postpone
-from database.scooters import get_scooters_by_client, get_scooter_by_id
+from database.scooters import get_scooters_by_client, get_scooter_by_id,  get_sheet_col_for_scooter
 from database.payments import get_unpaid_payments_by_scooter, get_payments_by_scooter, update_payment_amount,  save_payment_schedule_by_scooter, mark_payments_as_paid
 
 from handlers.cancel_handler import universal_cancel_handler, exit_lk_handler
@@ -26,7 +26,7 @@ from handlers.register_client import cleanup_previous_messages
 from handlers.keyboard_utils import get_keyboard
 from handlers.admin_edit import cleanup_client_messages
 
-
+from integrations.gsheets_fleet_matrix import record_payment_new_layout
 
 from utils.payments_utils import format_payment_schedule, get_payment_id_by_date
 from utils.time_utils import get_today
@@ -539,6 +539,40 @@ async def confirm_payment_callback(update: Update, context: ContextTypes.DEFAULT
 
     # ✅ Удаляем ключ из реестра (завершаем обработку)
     payment_confirm_registry.pop(key, None)
+# ✅ Проставляем суммы в Google Sheets для оплаченных платежей
+    for pid in payment_ids_to_mark:
+        # 1) читаем платёж из БД
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT scooter_id, payment_date, amount
+                    FROM payments
+                    WHERE id = %s
+                """, (pid,))
+                row = cur.fetchone()
+
+        if not row:
+            continue
+
+        scooter_id, payment_date, amount = row
+
+        # 2) узнаём левую колонку группы для этого скутера
+        left_col = get_sheet_col_for_scooter(scooter_id)
+        if not left_col:
+            print(f"[GS] нет sheet_col для scooter_id={scooter_id}")
+            continue
+
+    # 3) пишем сумму в соседнюю (правую) колонку напротив даты
+        try:
+            ok, msg = record_payment_new_layout(
+                left_group_col=left_col,
+                amount=int(amount or 0),
+                paid_date=payment_date,   # date или datetime — оба ок
+        )
+            print("[GS]", msg)
+        except Exception as e:
+            # не роняем обработчик подтверждения
+            print("[GS] ошибка записи платежа в шит:", e)
 
     await query.edit_message_text("✅ Оплата успешно подтверждена. Спасибо!")
 
@@ -853,17 +887,17 @@ async def confirm_postpone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_payment_schedule_by_scooter(scooter_id, [scheduled_date], new_amount)
 
     # Логгирование и уведомление
-    log_payment_postpone(
-        tg_id=tg_id,
-        full_name=client["full_name"],
-        phone=client["phone"],
-        city=client["city"],
-        original_date=original_date,
-        scheduled_date=scheduled_date,
-        with_fine=with_fine,
-        fine_amount=fine_amount,
-        vin=scooter["vin"]
-    )
+   # log_payment_postpone(
+    #    tg_id=tg_id,
+    #    full_name=client["full_name"],
+    #    phone=client["phone"],
+    #    city=client["city"],
+    #    original_date=original_date,
+     #   scheduled_date=scheduled_date,
+     #   with_fine=with_fine,
+     #   fine_amount=fine_amount,
+     #   vin=scooter["vin"]
+   # )
 
     await notify_admin_about_postpone(
         tg_id=tg_id,

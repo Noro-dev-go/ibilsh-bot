@@ -24,9 +24,6 @@ async def gs_choice_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Введи номер колонки в Google Sheets (например, 35).")
         return GS_WAIT_COL
 
-# admin_register.py (или где у тебя gs_enter_col)
-from integrations.gsheets_fleet_matrix import upsert_by_column_index, find_column_by_transport_number
-
 async def gs_enter_col(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = (update.message.text or "").strip()
     client_id = context.user_data.get("gs_current_client")
