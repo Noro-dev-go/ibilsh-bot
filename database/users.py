@@ -46,3 +46,10 @@ def set_user_has_scooter(tg_id: int):
                 WHERE tg_id = %s
             """, (tg_id,))
         conn.commit()
+
+
+def get_renters_tg_ids() -> list[int]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT tg_id FROM users WHERE has_scooter = TRUE")
+            return [row[0] for row in cur.fetchall()]
