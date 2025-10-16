@@ -1,4 +1,6 @@
 from database.db import get_connection
+from typing import Optional
+
 
 ALLOWED_FIELDS = {
     "model", "vin", "motor_vin", "issue_date",
@@ -37,7 +39,19 @@ def add_scooter(client_id: int, data: dict):
         conn.commit()
     return scooter_id
 
+def set_sheet_col_for_scooter(scooter_id: int, col_index: int) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE scooters SET sheet_col = %s WHERE id = %s", (col_index, scooter_id))
+        conn.commit()
 
+
+def get_sheet_col_for_scooter(scooter_id: int) -> int | None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT sheet_col FROM scooters WHERE id = %s", (scooter_id,))
+            row = cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else None
 
 def get_scooters_by_client(client_id: int):
     with get_connection() as conn:
