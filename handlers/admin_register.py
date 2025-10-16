@@ -8,16 +8,22 @@ from telegram.ext import (
 from datetime import datetime
 
 
+from integrations.gsheets_fleet_matrix import (
+    create_client_column_auto,
+    set_cost_value,
+    upload_image_bytes_to_drive,
+    place_client_photos,
+)
 
 
 from database.clients import add_client
-from database.scooters import add_scooter
+from database.scooters import add_scooter, set_sheet_col_for_scooter
 from database.payments import create_payment_schedule
 from database.users import add_user, set_user_has_scooter
 from database.pending import delete_pending_user, get_all_pending_users
 
 from utils.schedule_utils import get_next_fridays
-from utils.encryption import encrypt_file_id
+from utils.encryption import encrypt_file_id, decrypt_file_id
 
 
 from handlers.cancel_handler import universal_cancel_handler
@@ -401,8 +407,17 @@ async def finish_scooter_entry(update: Update, context: ContextTypes.DEFAULT_TYP
 async def save_all_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cleanup_register_messages(update, context)
     tg_id = context.user_data["tg_id_to_register"]
-    username = context.user_data.get("username")
 
+    # --- username c @ ---
+    username = context.user_data.get("username")
+    if not username:
+        u = update.effective_user
+        if u and u.username:
+            username = u.username
+    if username and not username.startswith("@"):
+        username = f"@{username}"
+
+    # --- 1) создаём клиента ---
     client_id = add_client(
         telegram_id=tg_id,
         username=username,
@@ -410,85 +425,90 @@ async def save_all_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         age=int(context.user_data["age"]),
         city=context.user_data["city"],
         phone=context.user_data["phone"],
-        workplace=context.user_data["workplace"],
+        workplace=context.user_data.get("workplace"),
         client_photo_id=context.user_data.get("client_photo_id"),
         passport_main_id=context.user_data.get("passport_main_id"),
-        passport_address_id=context.user_data.get("passport_address_id")
+        passport_address_id=context.user_data.get("passport_address_id"),
     )
 
-    for scooter in context.user_data["scooters"]:
+    # --- 2) обрабатываем каждый скутер пользователя ---
+    for scooter in context.user_data.get("scooters", []):
+        # 2.1) запись скутера в БД
         scooter_id = add_scooter(client_id, scooter)
+
+        # 2.2) график платежей в БД
         weeks = scooter.get("buyout_weeks") or 10
         payment_dates = get_next_fridays(scooter["issue_date"], weeks=weeks)
         create_payment_schedule(scooter_id, payment_dates, scooter["weekly_price"])
 
+        # 2.3) колонка в Google Sheets (левая колонка пары = даты)
+        new_sheet_payload = {
+            "ФИО": context.user_data["full_name"],
+            "Модель": scooter.get("model", ""),
+            "Дата выдачи": scooter.get("issue_date"),
+            "Тег в тг": username or "",
+            "Номер тел.": context.user_data["phone"],
+            "Основной склад": scooter.get("warehouse", "") or "",
+            "Договор": bool(scooter.get("has_contract", False)),
+            "Заметки": context.user_data.get("notes", "") or "",
+            "Стоимость": int(scooter.get("weekly_price", 0) or 0),
+            "Зашло": 0,
+        }
+
+        left_col, _ = create_client_column_auto(new_sheet_payload, project_name="Самокат")
+        set_cost_value(left_col, int(scooter.get("weekly_price", 0) or 0))
+        set_sheet_col_for_scooter(scooter_id, left_col)
+
+        # 2.4) фото → Drive → вставка в таблицу (если фотки есть)
+        async def _dl(enc_file_id: str | None) -> bytes | None:
+            if not enc_file_id:
+                return None
+            try:
+                file_id = decrypt_file_id(enc_file_id)
+                f = await context.bot.get_file(file_id)
+                return await f.download_as_bytearray()
+            except Exception as e:
+                print("[PH] download from TG failed:", e)
+            return None
+
+        
+        try:
+            img1 = await _dl(context.user_data.get("client_photo_id"))
+            img2 = await _dl(context.user_data.get("passport_main_id"))
+            img3 = await _dl(context.user_data.get("passport_address_id"))
+
+            print ("[PH] bytes present:", bool(img1), bool(img2), bool(img3))
+            if not (img1 and img2 and img3):
+                await update.effective_chat.send_message("⚠️ Не удалось скачать одно из фото из Telegram. Фото в Google Sheets не загружены.")
+            else:
+                url1 = upload_image_bytes_to_drive(img1, f"client_{scooter_id}_1.jpg")
+                url2 = upload_image_bytes_to_drive(img2, f"client_{scooter_id}_2.jpg")
+                url3 = upload_image_bytes_to_drive(img3, f"client_{scooter_id}_3.jpg")
+                print("[PH] urls:", url1, url2, url3)
+                place_client_photos(left_col, url1, url2, url3)
+                print ("[PH] placed at col", left_col)
+        except Exception as e:
+            print ("[PH] ERROR:", e)
+            await update.effective_chat.send_message("⚠️ Ошибка при загрузке фото в Google Sheets.")
+            #raise
+                
+
+
+    # --- 3) учёт пользователя и финал ---
     add_user(
         tg_id=tg_id,
         username=username,
         full_name=context.user_data["full_name"],
-        phone=context.user_data["phone"]
+        phone=context.user_data["phone"],
     )
-
     set_user_has_scooter(tg_id)
     delete_pending_user(tg_id)
 
-    client_full_name = context.user_data.get("full_name", "").strip()
-    phone = context.user_data.get("phone", "").strip()
-    workplace = context.user_data.get("workplace", "").strip()
+    await update.effective_chat.send_message(
+        "✅ Клиент успешно оформлен. Колонки и даты созданы в Google Sheets, стоимость выставлена."
+    )
+    return ConversationHandler.END
 
-    username = context.user_data.get("username")
-    if not username:
-        u = update.effective_user
-        if u and u.username:
-            username = f"@{u.username}"
-    # добавим @, если его нет
-    if username and not username.startswith("@"):
-        username = f"@{username}"
-
-    # 2) берём «основной» скутер для записи в колонку
-    #    (на тесте у тебя один скутер; при множестве — позже сделаем выбор по кнопкам)
-    scooter_for_sheet = (context.user_data.get("scooters") or [])[0]
-
-    # 3) формируем payload ровно под твои строки в таблице
-    context.user_data[f"gs_synced_{client_id}"] = False
-    context.user_data[f"gs_payload_{client_id}"] = {
-        "Стоимость аренды в н-ю.": scooter_for_sheet["weekly_price"],
-        "Дата введения в эксплуатацию": scooter_for_sheet.get("commission_date") or scooter_for_sheet["issue_date"],
-        "Начальная стоимость": scooter_for_sheet.get("initial_cost"),
-        "Зашло": scooter_for_sheet.get("deposit") or 0,
-        "Модель транспорта 1/2 АКБ": scooter_for_sheet["model"],
-        "Вин номер рамы": scooter_for_sheet["vin"],
-        "Вин номер мотора": scooter_for_sheet["motor_vin"],
-        "Вин номер АКБ#1": scooter_for_sheet.get("battery1_vin") or "нет",
-        "Вин номер АКБ#2": scooter_for_sheet.get("battery2_vin") or "нет",
-        "Наличие GPS": scooter_for_sheet.get("has_tracker", False),
-        "Дата выдачи": scooter_for_sheet["issue_date"],
-        "ФИО арендатора": client_full_name,
-        "Тег арендатора": username or "",
-        "Номер арендатора": phone,
-        "Место работы": workplace,
-        "Основной склад": scooter_for_sheet.get("warehouse") or "",
-        "Наличие договора": scooter_for_sheet.get("has_contract", False),
-        "Заметки": scooter_for_sheet.get("notes") or "",
-}
-
-    kb = InlineKeyboardMarkup([
-    [InlineKeyboardButton("➕ Добавить в Google Sheets", callback_data=f"gs_add:{client_id}")],
-    [InlineKeyboardButton("⏭️ Пропустить", callback_data=f"gs_skip:{client_id}")],
-])
-    await update.effective_chat.send_message("Оформление завершено. Добавить клиента в Google Sheets?", reply_markup=kb)
-    
-   
-#    keyboard = InlineKeyboardMarkup([
-  #      [
-  #          InlineKeyboardButton("Назад в главное меню админа", callback_data="reg_back"),
-  #      ]
-   # ])
- #   msg = await update.callback_query.message.reply_text("✅ Клиент успешно оформлен. График платежей создан.", reply_markup=keyboard)
-
-  #  context.user_data.setdefault("reg_message_ids", []).append(msg.message_id)  
-
- #   return ConversationHandler.END
 
 
 
